@@ -22,6 +22,7 @@ import tf_extended as tfe
 # =========================================================================== #
 # TensorFlow implementation of boxes SSD encoding / decoding.
 # =========================================================================== #
+
 def tf_ssd_bboxes_encode_layer(labels,
                                bboxes,
                                anchors_layer,
@@ -43,16 +44,17 @@ def tf_ssd_bboxes_encode_layer(labels,
     Return:
       (target_labels, target_localizations, target_scores): Target Tensors.
     """
-    # Anchors coordinates and volume.
+    # Anchors coordinates and volume. #anchor的坐标
     yref, xref, href, wref = anchors_layer
+    #转换成左上右下坐标
     ymin = yref - href / 2.
     xmin = xref - wref / 2.
     ymax = yref + href / 2.
     xmax = xref + wref / 2.
-    vol_anchors = (xmax - xmin) * (ymax - ymin)
+    vol_anchors = (xmax - xmin) * (ymax - ymin) #anchor面积
 
     # Initialize tensors...
-    shape = (yref.shape[0], yref.shape[1], href.size)
+    shape = (yref.shape[0], yref.shape[1], href.size)#初始化，特征图宽，高，还有坐标信息（4）   例如 38*38*4
     feat_labels = tf.zeros(shape, dtype=tf.int64)
     feat_scores = tf.zeros(shape, dtype=dtype)
 
@@ -60,7 +62,7 @@ def tf_ssd_bboxes_encode_layer(labels,
     feat_xmin = tf.zeros(shape, dtype=dtype)
     feat_ymax = tf.ones(shape, dtype=dtype)
     feat_xmax = tf.ones(shape, dtype=dtype)
-
+    #计算一个gtbox和所有anchor的交并比
     def jaccard_with_anchors(bbox):
         """Compute jaccard score between a box and the anchors.
         """
@@ -71,12 +73,12 @@ def tf_ssd_bboxes_encode_layer(labels,
         h = tf.maximum(int_ymax - int_ymin, 0.)
         w = tf.maximum(int_xmax - int_xmin, 0.)
         # Volumes.
-        inter_vol = h * w
+        inter_vol = h * w  #交面积
         union_vol = vol_anchors - inter_vol \
-            + (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
-        jaccard = tf.div(inter_vol, union_vol)
+            + (bbox[2] - bbox[0]) * (bbox[3] - bbox[1]) #并面积
+        jaccard = tf.div(inter_vol, union_vol)#交并比iou
         return jaccard
-
+    #计算一个bbox和anchor的交面积/anchor面积得到anchor得分
     def intersection_with_anchors(bbox):
         """Compute intersection between score a box and the anchors.
         """
@@ -86,17 +88,17 @@ def tf_ssd_bboxes_encode_layer(labels,
         int_xmax = tf.minimum(xmax, bbox[3])
         h = tf.maximum(int_ymax - int_ymin, 0.)
         w = tf.maximum(int_xmax - int_xmin, 0.)
-        inter_vol = h * w
-        scores = tf.div(inter_vol, vol_anchors)
+        inter_vol = h * w #交面积
+        scores = tf.div(inter_vol, vol_anchors) #交面积和anchor面积之比
         return scores
-
+    # 定义i和label长度选择小的一个的条件，返回小的
     def condition(i, feat_labels, feat_scores,
                   feat_ymin, feat_xmin, feat_ymax, feat_xmax):
         """Condition: check label index.
         """
         r = tf.less(i, tf.shape(labels))
         return r[0]
-
+    #更新特征的标签 得分和bbox坐标
     def body(i, feat_labels, feat_scores,
              feat_ymin, feat_xmin, feat_ymax, feat_xmax):
         """Body: update feature labels, scores and bboxes.
@@ -107,24 +109,24 @@ def tf_ssd_bboxes_encode_layer(labels,
         # Jaccard score.
         label = labels[i]
         bbox = bboxes[i]
-        jaccard = jaccard_with_anchors(bbox)
+        jaccard = jaccard_with_anchors(bbox)  #计算所有anchor和对应的一个bbox的交并比
         # Mask: check threshold + scores + no annotations + num_classes.
-        mask = tf.greater(jaccard, feat_scores)
+        mask = tf.greater(jaccard, feat_scores)  #jac大于score 就返回true 否则false
         # mask = tf.logical_and(mask, tf.greater(jaccard, matching_threshold))
-        mask = tf.logical_and(mask, feat_scores > -0.5)
-        mask = tf.logical_and(mask, label < num_classes)
+        mask = tf.logical_and(mask, feat_scores > -0.5) #逻辑与判断featsc大于-0.5  有问题？
+        mask = tf.logical_and(mask, label < num_classes) # 半段label在21个类别范围内
         imask = tf.cast(mask, tf.int64)
         fmask = tf.cast(mask, dtype)
         # Update values using mask.
-        feat_labels = imask * label + (1 - imask) * feat_labels
-        feat_scores = tf.where(mask, jaccard, feat_scores)
-
+        feat_labels = imask * label + (1 - imask) * feat_labels  #更新featlabel 要么0要么1
+        feat_scores = tf.where(mask, jaccard, feat_scores)  #给出得分 ， mask true 就用交并比作为feat的得分，
+        #修正框，fmask是1 就用bbox坐标修正anchor为gtbox坐标，为0 就用feature 坐标不变
         feat_ymin = fmask * bbox[0] + (1 - fmask) * feat_ymin
         feat_xmin = fmask * bbox[1] + (1 - fmask) * feat_xmin
         feat_ymax = fmask * bbox[2] + (1 - fmask) * feat_ymax
         feat_xmax = fmask * bbox[3] + (1 - fmask) * feat_xmax
 
-        # Check no annotation label: ignore these anchors...
+        # Check no annotation label: ignore these anchors...没有在21范围内标签就忽略这些anchor
         # interscts = intersection_with_anchors(bbox)
         # mask = tf.logical_and(interscts > ignore_threshold,
         #                       label == no_annotation_label)
@@ -141,12 +143,12 @@ def tf_ssd_bboxes_encode_layer(labels,
                                            [i, feat_labels, feat_scores,
                                             feat_ymin, feat_xmin,
                                             feat_ymax, feat_xmax])
-    # Transform to center / size.
+    # Transform to center / size.转换成xywh形式
     feat_cy = (feat_ymax + feat_ymin) / 2.
     feat_cx = (feat_xmax + feat_xmin) / 2.
     feat_h = feat_ymax - feat_ymin
     feat_w = feat_xmax - feat_xmin
-    # Encode features.
+    # Encode features.  计算偏移量
     feat_cy = (feat_cy - yref) / href / prior_scaling[0]
     feat_cx = (feat_cx - xref) / wref / prior_scaling[1]
     feat_h = tf.log(feat_h / href) / prior_scaling[2]
@@ -155,7 +157,7 @@ def tf_ssd_bboxes_encode_layer(labels,
     feat_localizations = tf.stack([feat_cx, feat_cy, feat_w, feat_h], axis=-1)
     return feat_labels, feat_localizations, feat_scores
 
-
+#利用ssd网络依据gtlabelg和bbox对anchor进行编码
 def tf_ssd_bboxes_encode(labels,
                          bboxes,
                          anchors,
@@ -183,7 +185,7 @@ def tf_ssd_bboxes_encode(labels,
         target_labels = []
         target_localizations = []
         target_scores = []
-        for i, anchors_layer in enumerate(anchors):
+        for i, anchors_layer in enumerate(anchors):#对所有层anchor进行操作
             with tf.name_scope('bboxes_encode_block_%i' % i):
                 t_labels, t_loc, t_scores = \
                     tf_ssd_bboxes_encode_layer(labels, bboxes, anchors_layer,
@@ -194,8 +196,7 @@ def tf_ssd_bboxes_encode(labels,
                 target_localizations.append(t_loc)
                 target_scores.append(t_scores)
         return target_labels, target_localizations, target_scores
-
-
+#定义解码层，从参考的anchor bbox中计算出bbox
 def tf_ssd_bboxes_decode_layer(feat_localizations,
                                anchors_layer,
                                prior_scaling=[0.1, 0.1, 0.2, 0.2]):
@@ -223,8 +224,7 @@ def tf_ssd_bboxes_decode_layer(feat_localizations,
     xmax = cx + w / 2.
     bboxes = tf.stack([ymin, xmin, ymax, xmax], axis=-1)
     return bboxes
-
-
+#定义解码，
 def tf_ssd_bboxes_decode(feat_localizations,
                          anchors,
                          prior_scaling=[0.1, 0.1, 0.2, 0.2],

@@ -32,7 +32,8 @@ is slightly different, and can lead to severe accuracy drop if not taken care
 in a correct way!
 
 In Caffe, the output size of convolution and pooling layers are computing as
-following: h_o = (h_i + 2 * pad_h - kernel_h) / stride_h + 1
+following: h_o = (h_i + 2 * pad_h - kernel_h) / stride_h + 1   这是coffee框架的计算公式，
+比较原理的计算公式要结合stride kernelsize还有dilation 一起计算，再stride=1和>1的时候计算公式不一样
 
 Nevertheless, there is a subtle difference between both for stride > 1. In
 the case of convolution:
@@ -78,7 +79,7 @@ SSDParams = namedtuple('SSDParameters', ['img_shape',
                                          'prior_scaling'
                                          ])
 
-
+#定义实现ssd300网络的类 #默认训练图片尺寸300*300*3
 class SSDNet(object):
     """Implementation of the SSD VGG-based 300 network.
 
@@ -97,8 +98,9 @@ class SSDNet(object):
         no_annotation_label=21,
         feat_layers=['block4', 'block7', 'block8', 'block9', 'block10', 'block11'],
         feat_shapes=[(38, 38), (19, 19), (10, 10), (5, 5), (3, 3), (1, 1)],
-        anchor_size_bounds=[0.15, 0.90],
+        anchor_size_bounds=[0.15, 0.90], #用于计算每个featuremap中priorbox的minisize 和maxsize
         # anchor_size_bounds=[0.20, 0.90],
+        #anchor box的大小，人为挑选 对应feature layer
         anchor_sizes=[(21., 45.),
                       (45., 99.),
                       (99., 153.),
@@ -111,18 +113,20 @@ class SSDNet(object):
         #               (162., 213.),
         #               (213., 264.),
         #               (264., 315.)],
+        #anchorbox的aspect ratio 每个anchor box 都要产生 ratio个prior box
         anchor_ratios=[[2, .5],
                        [2, .5, 3, 1./3],
                        [2, .5, 3, 1./3],
                        [2, .5, 3, 1./3],
                        [2, .5],
                        [2, .5]],
-        anchor_steps=[8, 16, 32, 64, 100, 300],
-        anchor_offset=0.5,
-        normalizations=[20, -1, -1, -1, -1, -1],
-        prior_scaling=[0.1, 0.1, 0.2, 0.2]
+        anchor_steps=[8, 16, 32, 64, 100, 300],  #特征图到原图的缩放比，相当于特征图的一个像素在原图的step个大小，
+        # 也对应teature layer
+        anchor_offset=0.5,#用于坐标计算，防止分子为0补偿阈值
+        normalizations=[20, -1, -1, -1, -1, -1], #该特征层是否正则，大于0就是正则，小于0 不是正则，对应feature layer
+        prior_scaling=[0.1, 0.1, 0.2, 0.2] #variance？bbox regression的权重？xy回归的权重，
         )
-
+    #初始化
     def __init__(self, params=None):
         """Init the SSD net with some parameters. Use the default ones
         if none provided.
@@ -133,6 +137,7 @@ class SSDNet(object):
             self.params = SSDNet.default_params
 
     # ======================================================================= #
+    # 定义ssd网络函数
     def net(self, inputs,
             is_training=True,
             update_feat_shapes=True,
@@ -142,6 +147,7 @@ class SSDNet(object):
             scope='ssd_300_vgg'):
         """SSD network definition.
         """
+        #r就是条用ssnet 的返回值是 分类值，得分值，坐标值，对应的block层输出特征
         r = ssd_net(inputs,
                     num_classes=self.params.num_classes,
                     feat_layers=self.params.feat_layers,
@@ -176,7 +182,7 @@ class SSDNet(object):
         """
         shapes = ssd_feat_shapes_from_net(predictions, self.params.feat_shapes)
         self.params = self.params._replace(feat_shapes=shapes)
-
+#计算给定图片大小下的anchor 的大小
     def anchors(self, img_shape, dtype=np.float32):
         """Compute the default anchor boxes, given an image shape.
         """
@@ -187,7 +193,7 @@ class SSDNet(object):
                                       self.params.anchor_steps,
                                       self.params.anchor_offset,
                                       dtype)
-
+    #定义encode函数，ssd中的encode就是对bbox和label进行编码
     def bboxes_encode(self, labels, bboxes, anchors,
                       scope=None):
         """Encode labels and bounding boxes.
@@ -199,7 +205,7 @@ class SSDNet(object):
             ignore_threshold=0.5,
             prior_scaling=self.params.prior_scaling,
             scope=scope)
-
+    #decodelabel和bbox
     def bboxes_decode(self, feat_localizations, anchors,
                       scope='ssd_bboxes_decode'):
         """Encode labels and bounding boxes.
@@ -208,7 +214,7 @@ class SSDNet(object):
             feat_localizations, anchors,
             prior_scaling=self.params.prior_scaling,
             scope=scope)
-
+    #从ssd网络每阶段的输出获得检测的bbox
     def detected_bboxes(self, predictions, localisations,
                         select_threshold=None, nms_threshold=0.5,
                         clipping_bbox=None, top_k=400, keep_top_k=200):
@@ -229,7 +235,7 @@ class SSDNet(object):
         if clipping_bbox is not None:
             rbboxes = tfe.bboxes_clip(clipping_bbox, rbboxes)
         return rscores, rbboxes
-
+    #定义损失函数
     def losses(self, logits, localisations,
                gclasses, glocalisations, gscores,
                match_threshold=0.5,
@@ -251,6 +257,7 @@ class SSDNet(object):
 # =========================================================================== #
 # SSD tools...
 # =========================================================================== #
+#基于相关框的大小计算anchor的大小，绝对的计算方法是从输入图片开始算。
 def ssd_size_bounds_to_values(size_bounds,
                               n_feat_layers,
                               img_shape=(300, 300)):
@@ -265,11 +272,13 @@ def ssd_size_bounds_to_values(size_bounds,
       list of list containing the absolute sizes at each scale. For each scale,
       the ratios only apply to the first value.
     """
-    assert img_shape[0] == img_shape[1]
+    assert img_shape[0] == img_shape[1]  #imagshape就是刚开始输入图片的大小
 
     img_size = img_shape[0]
-    min_ratio = int(size_bounds[0] * 100)
+    min_ratio = int(size_bounds[0] * 100)   #sizebound就是设定的[0.15,0.9]这个比例因子
     max_ratio = int(size_bounds[1] * 100)
+    #math。floor     Return the floor of x as an Integral.
+    # This is the largest integer <= x.  也就是step是个最大整数
     step = int(math.floor((max_ratio - min_ratio) / (n_feat_layers - 2)))
     # Start with the following smallest sizes.
     sizes = [[img_size * size_bounds[0] / 2, img_size * size_bounds[0]]]
@@ -278,7 +287,7 @@ def ssd_size_bounds_to_values(size_bounds,
                       img_size * (ratio + step) / 100.))
     return sizes
 
-
+#从预测层得到特征shape
 def ssd_feat_shapes_from_net(predictions, default_shapes=None):
     """Try to obtain the feature shapes from the prediction layers. The latter
     can be either a Tensor or Numpy ndarray.
@@ -287,25 +296,25 @@ def ssd_feat_shapes_from_net(predictions, default_shapes=None):
       list of feature shapes. Default values if predictions shape not fully
       determined.
     """
-    feat_shapes = []
-    for l in predictions:
+    feat_shapes = []   #featurehape 时一个列表
+    for l in predictions: #对于再prediction中的每个元素
         # Get the shape, from either a np array or a tensor.
-        if isinstance(l, np.ndarray):
+        if isinstance(l, np.ndarray):#如果时nparr 就返回结果
             shape = l.shape
-        else:
+        else:#若果不是就转list后截取
             shape = l.get_shape().as_list()
         shape = shape[1:4]
         # Problem: undetermined shape...
         if None in shape:
             return default_shapes
-        else:
+        else:  #将shape不断的添加到feature shape
             feat_shapes.append(shape)
-    return feat_shapes
+    return feat_shapes  #最后返回featureshape
 
-
+#计算一个特征层的默认anchorbox，确定，中心坐标个w，h
 def ssd_anchor_one_layer(img_shape,
                          feat_shape,
-                         sizes,
+                         sizes,#anchor size
                          ratios,
                          step,
                          offset=0.5,
@@ -327,40 +336,47 @@ def ssd_anchor_one_layer(img_shape,
       y, x, h, w: Relative x and y grids, and height and width.
     """
     # Compute the position grid: simple way.
-    # y, x = np.mgrid[0:feat_shape[0], 0:feat_shape[1]]
+    # y, x = np.mgrid[0:feat_shape[0], 0:feat_shape[1]]第一个是【38，38】
+    # 矩阵38*38 每行从0到37，有38行，每列从0-37 有38列
     # y = (y.astype(dtype) + offset) / feat_shape[0]
     # x = (x.astype(dtype) + offset) / feat_shape[1]
-    # Weird SSD-Caffe computation using steps values...
+    # Weird SSD-Caffe computation using steps values... x和y 是0-1之间的38*38的矩阵
     y, x = np.mgrid[0:feat_shape[0], 0:feat_shape[1]]
-    y = (y.astype(dtype) + offset) * step / img_shape[0]
+    y = (y.astype(dtype) + offset) * step / img_shape[0]  #从上面的改到下面，因为上面的取不到1，
+    # 下面的可以例如38*8=300/300=1
     x = (x.astype(dtype) + offset) * step / img_shape[1]
 
     # Expand dims to support easy broadcasting.
     y = np.expand_dims(y, axis=-1)
     x = np.expand_dims(x, axis=-1)
-
+    #xy是特征图上每个像素点的中心
     # Compute relative height and width.
     # Tries to follow the original implementation of SSD for the order.
-    num_anchors = len(sizes) + len(ratios)
+    # 数值为2+2
+    num_anchors = len(sizes) + len(ratios)  #anchor 的个数是ratio的个数和anchor size个数的和
     h = np.zeros((num_anchors, ), dtype=dtype)
     w = np.zeros((num_anchors, ), dtype=dtype)
     # Add first anchor boxes with ratio=1.
+    # 测试中，h[0]=21/300,w[0]=21/300?
     h[0] = sizes[0] / img_shape[0]
     w[0] = sizes[0] / img_shape[1]
     di = 1
     if len(sizes) > 1:
+        # h[1]=sqrt(21*45)/300
         h[1] = math.sqrt(sizes[0] * sizes[1]) / img_shape[0]
         w[1] = math.sqrt(sizes[0] * sizes[1]) / img_shape[1]
         di += 1
     for i, r in enumerate(ratios):
         h[i+di] = sizes[0] / img_shape[0] / math.sqrt(r)
         w[i+di] = sizes[0] / img_shape[1] * math.sqrt(r)
+        # 测试中，y和x shape为（38,38,1）
+        # h和w的shape为（4,）
     return y, x, h, w
 
-
+#对所有的特征层 计算anchorbox
 def ssd_anchors_all_layers(img_shape,
-                           layers_shape,
-                           anchor_sizes,
+                           layers_shape,#就是feature shape
+                           anchor_sizes, #anchor shape
                            anchor_ratios,
                            anchor_steps,
                            offset=0.5,
@@ -368,13 +384,13 @@ def ssd_anchors_all_layers(img_shape,
     """Compute anchor boxes for all feature layers.
     """
     layers_anchors = []
-    for i, s in enumerate(layers_shape):
-        anchor_bboxes = ssd_anchor_one_layer(img_shape, s,
+    for i, s in enumerate(layers_shape):#layershape是6个特征图层
+        anchor_bboxes = ssd_anchor_one_layer(img_shape, s, #输入图像大小，s是一个featureshape 的大小
                                              anchor_sizes[i],
                                              anchor_ratios[i],
                                              anchor_steps[i],
                                              offset=offset, dtype=dtype)
-        layers_anchors.append(anchor_bboxes)
+        layers_anchors.append(anchor_bboxes) #返回所有 层的 xywh
     return layers_anchors
 
 
@@ -397,10 +413,10 @@ def tensor_shape(x, rank=3):
         return [s if s is not None else d
                 for s, d in zip(static_shape, dynamic_shape)]
 
-
-def ssd_multibox_layer(inputs,
-                       num_classes,
-                       sizes,
+#搭建一个multibox层，返回类别和位置预测
+def ssd_multibox_layer(inputs, #特征输入
+                       num_classes,#21
+                       sizes, #
                        ratios=[1],
                        normalization=-1,
                        bn_normalization=False):
@@ -428,7 +444,7 @@ def ssd_multibox_layer(inputs,
                           tensor_shape(cls_pred, 4)[:-1]+[num_anchors, num_classes])
     return cls_pred, loc_pred
 
-
+# 定义ssd网络
 def ssd_net(inputs,
             num_classes=SSDNet.default_params.num_classes,
             feat_layers=SSDNet.default_params.feat_layers,
@@ -446,11 +462,13 @@ def ssd_net(inputs,
     #     inputs = tf.transpose(inputs, perm=(0, 3, 1, 2))
 
     # End_points collect relevant activations for external use.
-    end_points = {}
-    with tf.variable_scope(scope, 'ssd_300_vgg', [inputs], reuse=reuse):
+    end_points = {} #endpoint收集以后会用到的数据层
+    with tf.variable_scope(scope, 'ssd_300_vgg', [inputs], reuse=reuse): #定义vgg初始网络
         # Original VGG-16 blocks.
+        #输入是inputs，2是重复次数，执行操作是conv2d，64是outchanel [3，3]卷积核
         net = slim.repeat(inputs, 2, slim.conv2d, 64, [3, 3], scope='conv1')
         end_points['block1'] = net
+        #执行maxpooling，尺寸变一半
         net = slim.max_pool2d(net, [2, 2], scope='pool1')
         # Block 2.
         net = slim.repeat(net, 2, slim.conv2d, 128, [3, 3], scope='conv2')
@@ -469,8 +487,8 @@ def ssd_net(inputs,
         end_points['block5'] = net
         net = slim.max_pool2d(net, [3, 3], stride=1, scope='pool5')
 
-        # Additional SSD blocks.
-        # Block 6: let's dilate the hell out of it!
+        # Additional SSD blocks.  外加的ssd层
+        # Block 6: let's dilate the hell out of it! 输出shape19*19*1024
         net = slim.conv2d(net, 1024, [3, 3], rate=6, scope='conv6')
         end_points['block6'] = net
         net = tf.layers.dropout(net, rate=dropout_keep_prob, training=is_training)
@@ -502,21 +520,23 @@ def ssd_net(inputs,
             net = slim.conv2d(net, 128, [1, 1], scope='conv1x1')
             net = slim.conv2d(net, 256, [3, 3], scope='conv3x3', padding='VALID')
         end_points[end_point] = net
-
+#预测和定位
         # Prediction and localisations layers.
         predictions = []
         logits = []
         localisations = []
         for i, layer in enumerate(feat_layers):
             with tf.variable_scope(layer + '_box'):
-                p, l = ssd_multibox_layer(end_points[layer],
+                #接收特征层输出，生成类别和位置预测
+                p, l = ssd_multibox_layer(end_points[layer],  #layer就是想用来计算类别和位置的那个几个特征层
                                           num_classes,
-                                          anchor_sizes[i],
-                                          anchor_ratios[i],
-                                          normalizations[i])
-            predictions.append(prediction_fn(p))
-            logits.append(p)
-            localisations.append(l)
+                                          anchor_sizes[i],#就是给每个层人工定义好的anchor大小【x，y】
+                                          anchor_ratios[i],#也是认为定义好的比例，每个list有的个数不一样，
+                                          # 代表每个特征层使用比例个数不一样
+                                          normalizations[i])#对应要不要正则化
+            predictions.append(prediction_fn(p)) #保存预测结果
+            logits.append(p) #预测类得分
+            localisations.append(l) #预测坐标回归
 
         return predictions, localisations, logits, end_points
 ssd_net.default_image_size = 300
