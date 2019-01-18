@@ -161,8 +161,8 @@ def tf_ssd_bboxes_encode_layer(labels,
 def tf_ssd_bboxes_encode(labels,
                          bboxes,
                          anchors,
-                         num_classes,
-                         no_annotation_label,
+                         num_classes,#21
+                         no_annotation_label,#21
                          ignore_threshold=0.5,
                          prior_scaling=[0.1, 0.1, 0.2, 0.2],
                          dtype=tf.float32,
@@ -252,6 +252,7 @@ def tf_ssd_bboxes_decode(feat_localizations,
 # =========================================================================== #
 # SSD boxes selection.
 # =========================================================================== #
+#从一个层的特征中提取类别和得分
 def tf_ssd_bboxes_select_layer(predictions_layer, localizations_layer,
                                select_threshold=None,
                                num_classes=21,
@@ -269,6 +270,7 @@ def tf_ssd_bboxes_select_layer(predictions_layer, localizations_layer,
       d_scores, d_bboxes: Dictionary of scores and bboxes Tensors of
         size Batches X N x 1 | 4. Each key corresponding to a class.
     """
+    #如果没有定义阈值，那么设为0
     select_threshold = 0.0 if select_threshold is None else select_threshold
     with tf.name_scope(scope, 'ssd_bboxes_select_layer',
                        [predictions_layer, localizations_layer]):
@@ -282,9 +284,9 @@ def tf_ssd_bboxes_select_layer(predictions_layer, localizations_layer,
 
         d_scores = {}
         d_bboxes = {}
-        for c in range(0, num_classes):
+        for c in range(0, num_classes): #在所有的类别中，只要不是背景类，
             if c != ignore_class:
-                # Remove boxes under the threshold.
+                # Remove boxes under the threshold.  删除小于阈值的box
                 scores = predictions_layer[:, :, c]
                 fmask = tf.cast(tf.greater_equal(scores, select_threshold), scores.dtype)
                 scores = scores * fmask
@@ -295,7 +297,7 @@ def tf_ssd_bboxes_select_layer(predictions_layer, localizations_layer,
 
         return d_scores, d_bboxes
 
-
+#从网络的所有输出层提取出，类别，得分和bbox信息
 def tf_ssd_bboxes_select(predictions_net, localizations_net,
                          select_threshold=None,
                          num_classes=21,
@@ -317,7 +319,7 @@ def tf_ssd_bboxes_select(predictions_net, localizations_net,
                        [predictions_net, localizations_net]):
         l_scores = []
         l_bboxes = []
-        for i in range(len(predictions_net)):
+        for i in range(len(predictions_net)):  #从每个预测网络的输出提取得分和bbox信息
             scores, bboxes = tf_ssd_bboxes_select_layer(predictions_net[i],
                                                         localizations_net[i],
                                                         select_threshold,
@@ -334,8 +336,8 @@ def tf_ssd_bboxes_select(predictions_net, localizations_net,
             d_scores[c] = tf.concat(ls, axis=1)
             d_bboxes[c] = tf.concat(lb, axis=1)
         return d_scores, d_bboxes
-
-
+#从一个ssd的预测层，坐标层，
+#从一个特征层提取类别，得分，bbox坐标
 def tf_ssd_bboxes_select_layer_all_classes(predictions_layer, localizations_layer,
                                            select_threshold=None):
     """Extract classes, scores and bounding boxes from features in one layer.
@@ -357,24 +359,24 @@ def tf_ssd_bboxes_select_layer_all_classes(predictions_layer, localizations_laye
     localizations_layer = tf.reshape(localizations_layer,
                                      tf.stack([l_shape[0], -1, l_shape[-1]]))
     # Boxes selection: use threshold or score > no-label criteria.
-    if select_threshold is None or select_threshold == 0:
-        # Class prediction and scores: assign 0. to 0-class
-        classes = tf.argmax(predictions_layer, axis=2)
-        scores = tf.reduce_max(predictions_layer, axis=2)
+    if select_threshold is None or select_threshold == 0:  #在没有选择box的阈值时，谁的得分高，就选谁的box
+        # Class prediction and scores: assign 0. to 0-class  默认0就是0类（背景类）
+        classes = tf.argmax(predictions_layer, axis=2) #返回预测层最大的那个序号作为类别
+        scores = tf.reduce_max(predictions_layer, axis=2)  #在给定维度上计算最大的得分
         scores = scores * tf.cast(classes > 0, scores.dtype)
     else:
         sub_predictions = predictions_layer[:, :, 1:]
         classes = tf.argmax(sub_predictions, axis=2) + 1
         scores = tf.reduce_max(sub_predictions, axis=2)
         # Only keep predictions higher than threshold.
-        mask = tf.greater(scores, select_threshold)
-        classes = classes * tf.cast(mask, classes.dtype)
-        scores = scores * tf.cast(mask, scores.dtype)
+        mask = tf.greater(scores, select_threshold)  #mask存储的时得分高于阈值的ture 低于的false
+        classes = classes * tf.cast(mask, classes.dtype)  #类别序号*0/1掩码，得到类别序号和0
+        scores = scores * tf.cast(mask, scores.dtype)   #得分也这样处理
     # Assume localization layer already decoded.
     bboxes = localizations_layer
     return classes, scores, bboxes
 
-
+#从网络输出层提取类别，得分，bbox，返回结果的列表
 def tf_ssd_bboxes_select_all_classes(predictions_net, localizations_net,
                                      select_threshold=None,
                                      scope=None):

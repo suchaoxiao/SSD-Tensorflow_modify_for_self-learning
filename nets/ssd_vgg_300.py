@@ -95,7 +95,7 @@ class SSDNet(object):
     default_params = SSDParams(
         img_shape=(300, 300),
         num_classes=21,
-        no_annotation_label=21,
+        no_annotation_label=21,  #没有注释的标签
         feat_layers=['block4', 'block7', 'block8', 'block9', 'block10', 'block11'],
         feat_shapes=[(38, 38), (19, 19), (10, 10), (5, 5), (3, 3), (1, 1)],
         anchor_size_bounds=[0.15, 0.90], #用于计算每个featuremap中priorbox的minisize 和maxsize
@@ -182,7 +182,7 @@ class SSDNet(object):
         """
         shapes = ssd_feat_shapes_from_net(predictions, self.params.feat_shapes)
         self.params = self.params._replace(feat_shapes=shapes)
-#计算给定图片大小下的anchor 的大小
+#计算给定图片大小下所有的anchor 的都计算出来
     def anchors(self, img_shape, dtype=np.float32):
         """Compute the default anchor boxes, given an image shape.
         """
@@ -200,8 +200,8 @@ class SSDNet(object):
         """
         return ssd_common.tf_ssd_bboxes_encode(
             labels, bboxes, anchors,
-            self.params.num_classes,
-            self.params.no_annotation_label,
+            self.params.num_classes,#21
+            self.params.no_annotation_label,#21
             ignore_threshold=0.5,
             prior_scaling=self.params.prior_scaling,
             scope=scope)
@@ -220,7 +220,7 @@ class SSDNet(object):
                         clipping_bbox=None, top_k=400, keep_top_k=200):
         """Get the detected bounding boxes from the SSD network output.
         """
-        # Select top_k bboxes from predictions, and clip
+        # Select top_k bboxes from predictions, and clip，从prediction 中选择topk个bboxes
         rscores, rbboxes = \
             ssd_common.tf_ssd_bboxes_select(predictions, localisations,
                                             select_threshold=select_threshold,
@@ -352,7 +352,7 @@ def ssd_anchor_one_layer(img_shape,
     #xy是特征图上每个像素点的中心
     # Compute relative height and width.
     # Tries to follow the original implementation of SSD for the order.
-    # 数值为2+2
+    # 数值为2+2 这个地方感觉应该用乘法？使用defaultbox或者prior box 生成bbox 或anchor
     num_anchors = len(sizes) + len(ratios)  #anchor 的个数是ratio的个数和anchor size个数的和
     h = np.zeros((num_anchors, ), dtype=dtype)
     w = np.zeros((num_anchors, ), dtype=dtype)
@@ -375,7 +375,7 @@ def ssd_anchor_one_layer(img_shape,
 
 #对所有的特征层 计算anchorbox
 def ssd_anchors_all_layers(img_shape,
-                           layers_shape,#就是feature shape
+                           layers_shape,#就是所有layer的feature shape的集和
                            anchor_sizes, #anchor shape
                            anchor_ratios,
                            anchor_steps,
@@ -595,6 +595,7 @@ def ssd_arg_scope_caffe(caffe_scope):
 # =========================================================================== #
 # SSD loss function.
 # =========================================================================== #
+# 定义ssd网络的损失函数
 def ssd_losses(logits, localisations,
                gclasses, glocalisations, gscores,
                match_threshold=0.5,
@@ -608,7 +609,7 @@ def ssd_losses(logits, localisations,
         num_classes = lshape[-1]
         batch_size = lshape[0]
 
-        # Flatten out all vectors!
+        # Flatten out all vectors!将所有的矩阵压平
         flogits = []
         fgclasses = []
         fgscores = []
@@ -628,33 +629,33 @@ def ssd_losses(logits, localisations,
         glocalisations = tf.concat(fglocalisations, axis=0)
         dtype = logits.dtype
 
-        # Compute positive matching mask...
-        pmask = gscores > match_threshold
+        # Compute positive matching mask...计算pos
+        pmask = gscores > match_threshold  #  gscore是一个gtbox与所有anchor的得分，gscore大于匹配阈值的框可以有遇多个
         fpmask = tf.cast(pmask, dtype)
-        n_positives = tf.reduce_sum(fpmask)
+        n_positives = tf.reduce_sum(fpmask) #从mask的个数统计正样本个数
 
-        # Hard negative mining...
+        # Hard negative mining... 负样本挖掘
         no_classes = tf.cast(pmask, tf.int32)
         predictions = slim.softmax(logits)
-        nmask = tf.logical_and(tf.logical_not(pmask),
+        nmask = tf.logical_and(tf.logical_not(pmask), #对pmask取反得到小于阈值anchor的为1
                                gscores > -0.5)
         fnmask = tf.cast(nmask, dtype)
         nvalues = tf.where(nmask,
                            predictions[:, 0],
-                           1. - fnmask)
+                           1. - fnmask)  #如果是负样本，nvaue就是预测的得分，如果不是，nvalue就是0
         nvalues_flat = tf.reshape(nvalues, [-1])
         # Number of negative entries to select.
-        max_neg_entries = tf.cast(tf.reduce_sum(fnmask), tf.int32)
-        n_neg = tf.cast(negative_ratio * n_positives, tf.int32) + batch_size
-        n_neg = tf.minimum(n_neg, max_neg_entries)
+        max_neg_entries = tf.cast(tf.reduce_sum(fnmask), tf.int32) #负样本数量
+        n_neg = tf.cast(negative_ratio * n_positives, tf.int32) + batch_size  #负样本数量是正样本的三倍
+        n_neg = tf.minimum(n_neg, max_neg_entries)  #在已经有的负样本数量和应该有负样本数量选小者
 
-        val, idxes = tf.nn.top_k(-nvalues_flat, k=n_neg)
+        val, idxes = tf.nn.top_k(-nvalues_flat, k=n_neg)# 负样本得分高的先选
         max_hard_pred = -val[-1]
         # Final negative mask.
         nmask = tf.logical_and(nmask, nvalues < max_hard_pred)
         fnmask = tf.cast(nmask, dtype)
 
-        # Add cross-entropy loss.
+        # Add cross-entropy loss.  分别对正负样本使用交叉熵
         with tf.name_scope('cross_entropy_pos'):
             loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits,
                                                                   labels=gclasses)
@@ -671,7 +672,7 @@ def ssd_losses(logits, localisations,
         with tf.name_scope('localization'):
             # Weights Tensor: positive mask + random negative.
             weights = tf.expand_dims(alpha * fpmask, axis=-1)
-            loss = custom_layers.abs_smooth(localisations - glocalisations)
+            loss = custom_layers.abs_smooth(localisations - glocalisations)  #坐标loss用L1正则
             loss = tf.div(tf.reduce_sum(loss * weights), batch_size, name='value')
             tf.losses.add_loss(loss)
 
