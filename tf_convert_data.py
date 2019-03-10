@@ -34,13 +34,13 @@ tf.app.flags.DEFINE_string(
     'dataset_name', 'pascalvoc',
     'The name of the dataset to convert.')
 tf.app.flags.DEFINE_string(
-    'dataset_dir', None,
+    'dataset_dir', "D:\\datasets\\VOCdevkit\\VOC2007\\",
     'Directory where the original dataset is stored.')
 tf.app.flags.DEFINE_string(
-    'output_name', 'pascalvoc',
+    'output_name', 'voc_2007_train',
     'Basename used for TFRecords output files.')
 tf.app.flags.DEFINE_string(
-    'output_dir', './',
+    'output_dir', './tfrecords',
     'Output directory where to store TFRecords files.')
 
 

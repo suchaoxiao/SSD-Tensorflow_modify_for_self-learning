@@ -113,7 +113,7 @@ class SSDNet(object):
         #               (162., 213.),
         #               (213., 264.),
         #               (264., 315.)],
-        #anchorbox的aspect ratio 每个anchor box 都要产生 ratio个prior box
+        #anchorbox的aspect ratio 每个anchor box 都要产生 ratio个prior box这样就可以产生466644 个anchorbox
         anchor_ratios=[[2, .5],
                        [2, .5, 3, 1./3],
                        [2, .5, 3, 1./3],
@@ -122,9 +122,9 @@ class SSDNet(object):
                        [2, .5]],
         anchor_steps=[8, 16, 32, 64, 100, 300],  #特征图到原图的缩放比，相当于特征图的一个像素在原图的step个大小，
         # 也对应teature layer
-        anchor_offset=0.5,#用于坐标计算，防止分子为0补偿阈值
+        anchor_offset=0.5,#用于坐标计算，放在单元格中间
         normalizations=[20, -1, -1, -1, -1, -1], #该特征层是否正则，大于0就是正则，小于0 不是正则，对应feature layer
-        prior_scaling=[0.1, 0.1, 0.2, 0.2] #variance？bbox regression的权重？xy回归的权重，
+        prior_scaling=[0.1, 0.1, 0.2, 0.2] #variance？bbox regression的权重？xy回归的权重，偏差修正系数
         )
     #初始化
     def __init__(self, params=None):
@@ -159,7 +159,7 @@ class SSDNet(object):
                     prediction_fn=prediction_fn,
                     reuse=reuse,
                     scope=scope)
-        # Update feature shapes (try at least!)
+        # Update feature shapes (try at least!)更新特征尺寸
         if update_feat_shapes:
             shapes = ssd_feat_shapes_from_net(r[0], self.params.feat_shapes)
             self.params = self.params._replace(feat_shapes=shapes)
@@ -193,7 +193,7 @@ class SSDNet(object):
                                       self.params.anchor_steps,
                                       self.params.anchor_offset,
                                       dtype)
-    #定义encode函数，ssd中的encode就是对bbox和label进行编码
+    #定义encode函数，ssd中的encode就是对bbox和anchor坐标计算称为编码
     def bboxes_encode(self, labels, bboxes, anchors,
                       scope=None):
         """Encode labels and bounding boxes.
@@ -285,7 +285,7 @@ def ssd_size_bounds_to_values(size_bounds,
     for ratio in range(min_ratio, max_ratio + 1, step):
         sizes.append((img_size * ratio / 100.,
                       img_size * (ratio + step) / 100.))
-    return sizes
+    return sizes  #size就是最大和最小两个anchor框的真实大小
 
 #从预测层得到特征shape
 def ssd_feat_shapes_from_net(predictions, default_shapes=None):
@@ -340,9 +340,9 @@ def ssd_anchor_one_layer(img_shape,
     # 矩阵38*38 每行从0到37，有38行，每列从0-37 有38列
     # y = (y.astype(dtype) + offset) / feat_shape[0]
     # x = (x.astype(dtype) + offset) / feat_shape[1]
-    # Weird SSD-Caffe computation using steps values... x和y 是0-1之间的38*38的矩阵
+    # Weird SSD-Caffe computation using steps values... x和y 是0-1之间的38*38的矩阵 以第一个输出的featuremap为例后面是【38，19，10，5，3，1】
     y, x = np.mgrid[0:feat_shape[0], 0:feat_shape[1]]
-    y = (y.astype(dtype) + offset) * step / img_shape[0]  #从上面的改到下面，因为上面的取不到1，
+    y = (y.astype(dtype) + offset) * step / img_shape[0]  #从上面的改到下面，因为上面的取不到1，  step是感受野
     # 下面的可以例如38*8=300/300=1
     x = (x.astype(dtype) + offset) * step / img_shape[1]
 

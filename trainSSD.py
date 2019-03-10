@@ -1,17 +1,4 @@
-# Copyright 2016 Paul Balanca. All Rights Reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-# http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-# ==============================================================================
+
 """Generic training script that trains a SSD model using a given dataset."""
 import tensorflow as tf
 from tensorflow.python.ops import control_flow_ops
@@ -27,7 +14,7 @@ slim = tf.contrib.slim
 DATA_FORMAT = 'NCHW'
 
 # =========================================================================== #
-# SSD Network flags.
+# SSD Network flags.网络参数
 # =========================================================================== #
 tf.app.flags.DEFINE_float(
     'loss_alpha', 1., 'Alpha parameter in the loss function.')
@@ -37,10 +24,10 @@ tf.app.flags.DEFINE_float(
     'match_threshold', 0.5, 'Matching threshold in the loss function.')
 
 # =========================================================================== #
-# General Flags.
+# General Flags.训练迭代参数
 # =========================================================================== #
 tf.app.flags.DEFINE_string(
-    'train_dir', '/tmp/tfmodel/',
+    'train_dir', './logs/',
     'Directory where checkpoints and event logs are written to.')
 tf.app.flags.DEFINE_integer('num_clones', 1,
                             'Number of model clones to deploy.')
@@ -66,7 +53,7 @@ tf.app.flags.DEFINE_float(
     'gpu_memory_fraction', 0.8, 'GPU memory fraction to use.')
 
 # =========================================================================== #
-# Optimization Flags.
+# Optimization Flags.优化器设置
 # =========================================================================== #
 tf.app.flags.DEFINE_float(
     'weight_decay', 0.00004, 'The weight decay on the model weights.')
@@ -103,7 +90,7 @@ tf.app.flags.DEFINE_float('rmsprop_momentum', 0.9, 'Momentum.')
 tf.app.flags.DEFINE_float('rmsprop_decay', 0.9, 'Decay term for RMSProp.')
 
 # =========================================================================== #
-# Learning Rate Flags.
+# Learning Rate Flags.学习率
 # =========================================================================== #
 tf.app.flags.DEFINE_string(
     'learning_rate_decay_type',
@@ -127,7 +114,7 @@ tf.app.flags.DEFINE_float(
     'If left as None, then moving averages are not used.')
 
 # =========================================================================== #
-# Dataset Flags.
+# Dataset Flags.数据集
 # =========================================================================== #
 tf.app.flags.DEFINE_string(
     'dataset_name', 'pascalvoc_2007', 'The name of the dataset to load.')
@@ -138,7 +125,7 @@ tf.app.flags.DEFINE_string(
 # tf.app.flags.DEFINE_string(
 #     'dataset_dir', None, 'The directory where the dataset files are stored.')
 tf.app.flags.DEFINE_string(
-    'dataset_dir','./', 'The directory where the dataset files are stored.')
+    'dataset_dir','./tfrecords', 'The directory where the dataset files are stored.')
 tf.app.flags.DEFINE_integer(
     'labels_offset', 0,
     'An offset for the labels in the dataset. This flag is primarily used to '
@@ -181,7 +168,7 @@ FLAGS = tf.app.flags.FLAGS
 
 
 # =========================================================================== #
-# Main training routine.
+# Main training routine.训练主线
 # =========================================================================== #
 def main(_):
     if not FLAGS.dataset_dir:
@@ -239,7 +226,7 @@ def main(_):
                 image_preprocessing_fn(image, glabels, gbboxes,
                                        out_shape=ssd_shape,
                                        data_format=DATA_FORMAT)
-            # Encode groundtruth labels and bboxes.
+            # Encode groundtruth labels and bboxes.得到的是每个bbox先验框的类别，位置编码，得分
             gclasses, glocalisations, gscores = \
                 ssd_net.bboxes_encode(glabels, gbboxes, ssd_anchors)
             batch_shape = [1] + [len(ssd_anchors)] * 3
