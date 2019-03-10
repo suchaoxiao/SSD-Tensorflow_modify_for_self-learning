@@ -23,12 +23,13 @@ from datasets import imagenet
 
 from datasets import pascalvoc_2007
 from datasets import pascalvoc_2012
-
+from datasets import kitti
 datasets_map = {
     'cifar10': cifar10,
     'imagenet': imagenet,
     'pascalvoc_2007': pascalvoc_2007,
     'pascalvoc_2012': pascalvoc_2012,
+    'kitti': kitti,
 }
 
 
@@ -53,3 +54,5 @@ def get_dataset(name, split_name, dataset_dir, file_pattern=None, reader=None):
                                         dataset_dir,
                                         file_pattern,
                                         reader)
+
+
